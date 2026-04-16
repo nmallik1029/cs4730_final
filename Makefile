@@ -1,19 +1,20 @@
 CXX      = g++
 CXXFLAGS = -std=c++17 -Wall -O2 -pthread
+SRC      = src
 
 all: coordinator worker client fed_coordinator
 
-coordinator: coordinator.cpp model.cpp model.hpp
-	$(CXX) $(CXXFLAGS) -o coordinator coordinator.cpp model.cpp
+coordinator: $(SRC)/coordinator.cpp $(SRC)/model.cpp $(SRC)/model.hpp
+	$(CXX) $(CXXFLAGS) -I$(SRC) -o coordinator $(SRC)/coordinator.cpp $(SRC)/model.cpp
 
-worker: worker.cpp model.cpp model.hpp
-	$(CXX) $(CXXFLAGS) -o worker worker.cpp model.cpp
+worker: $(SRC)/worker.cpp $(SRC)/model.cpp $(SRC)/model.hpp
+	$(CXX) $(CXXFLAGS) -I$(SRC) -o worker $(SRC)/worker.cpp $(SRC)/model.cpp
 
-client: client.cpp
-	$(CXX) $(CXXFLAGS) -o client client.cpp
+client: $(SRC)/client.cpp
+	$(CXX) $(CXXFLAGS) -o client $(SRC)/client.cpp
 
-fed_coordinator: fed_coordinator.cpp
-	$(CXX) $(CXXFLAGS) -o fed_coordinator fed_coordinator.cpp
+fed_coordinator: $(SRC)/fed_coordinator.cpp
+	$(CXX) $(CXXFLAGS) -o fed_coordinator $(SRC)/fed_coordinator.cpp
 
 clean:
 	rm -f coordinator worker client fed_coordinator
