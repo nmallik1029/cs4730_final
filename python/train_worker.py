@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# federated training worker (numpy only, so it runs on khoury)
-# trains locally on a subset of MNIST classes, then does R rounds of FedAvg with the coordinator
 
 import sys, os, socket, struct, csv, gzip
 import numpy as np
@@ -14,18 +12,19 @@ if len(sys.argv) != 7:
     print("  shard: e.g. 0-4, 5-9, or all")
     sys.exit(1)
 
-wid = sys.argv[1]
-host = sys.argv[2]
-port = int(sys.argv[3])
-shard = sys.argv[4]
-rounds = int(sys.argv[5])
-data_dir = sys.argv[6]
+wid       = sys.argv[1]
+host      = sys.argv[2]
+port      = int(sys.argv[3])
+shard     = sys.argv[4]
+rounds    = int(sys.argv[5])
+data_dir  = sys.argv[6]
 
+# --- load MNIST from raw IDX files ---
 def read_idx(path):
     op = gzip.open if path.endswith(".gz") else open
     with op(path, "rb") as f:
         magic = int.from_bytes(f.read(4), "big")
-        n = int.from_bytes(f.read(4), "big")
+        n     = int.from_bytes(f.read(4), "big")
         if magic == 2051:
             r = int.from_bytes(f.read(4), "big")
             c = int.from_bytes(f.read(4), "big")
@@ -146,7 +145,8 @@ s.sendall(struct.pack("<ii", MSG_REGISTER, len(idb)) + idb)
 print(f"[{wid}] connected to {host}:{port}")
 
 # --- main loop ---
-csv_path = f"accuracy_{wid}.csv"
+os.makedirs("results", exist_ok=True)
+csv_path = f"results/accuracy_{wid}.csv"
 with open(csv_path, "w", newline="") as f:
     w = csv.writer(f)
     w.writerow(["round", "local_accuracy", "federated_accuracy"])
@@ -174,6 +174,6 @@ with open(csv_path, "w", newline="") as f:
 s.close()
 
 # save final weights so they can be used for inference
-with open(f"weights_fed_{wid}.bin", "wb") as wf:
+with open(f"results/weights_fed_{wid}.bin", "wb") as wf:
     wf.write(to_floats().tobytes())
-print(f"[{wid}] saved weights_fed_{wid}.bin")
+print(f"[{wid}] saved results/weights_fed_{wid}.bin")

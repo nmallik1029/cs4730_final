@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# plots federated accuracy over rounds from accuracy_A.csv and accuracy_B.csv
 
 import csv
 import matplotlib.pyplot as plt
@@ -13,8 +12,8 @@ def load(p):
             fed.append(float(row["federated_accuracy"]))
     return rs, loc, fed
 
-rA, laA, fedA = load("accuracy_A.csv")
-rB, laB, fedB = load("accuracy_B.csv")
+rA, laA, fedA = load("results/accuracy_A.csv")
+rB, laB, fedB = load("results/accuracy_B.csv")
 
 # prepend round 0 at 10% (random guess baseline for 10-class problem)
 rs  = [0] + rA
@@ -40,11 +39,11 @@ ax.grid(alpha=0.3)
 ax.legend(loc="lower right")
 
 plt.tight_layout()
-plt.savefig("accuracy_plot.png", dpi=150)
-print("wrote accuracy_plot.png")
+plt.savefig("figures/accuracy_plot.png", dpi=150)
+print("wrote figures/accuracy_plot.png")
 
 print(f"\nsummary:")
-print(f"final federated: {fed[-1]:.2f}%")
-print(f"worker A alone:  {la[-1]:.2f}%")
-print(f"worker B alone:  {lb[-1]:.2f}%")
-print(f"centralized:     {CENTRALIZED}%")
+print(f"  final federated: {fed[-1]:.2f}%")
+print(f"  worker A alone:  {la[-1]:.2f}%")
+print(f"  worker B alone:  {lb[-1]:.2f}%")
+print(f"  centralized:     {CENTRALIZED}%")

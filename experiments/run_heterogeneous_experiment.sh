@@ -2,16 +2,18 @@
 
 set -e
 
-if [ ! -f weights.bin ] || [ ! -f mnist_test.bin ] || [ ! -x worker ] || [ ! -x coordinator ] || [ ! -x client ]; then
-    echo "missing weights.bin, mnist_test.bin, or executables. run 'make' first."
+if [ ! -f data/weights.bin ] || [ ! -f data/mnist_test.bin ] || [ ! -x worker ] || [ ! -x coordinator ] || [ ! -x client ]; then
+    echo "missing data files or executables. run 'make' from project root."
     exit 1
 fi
+
+mkdir -p results
 
 PORT=5000
 N=3000
 C=16
 STRATS=("round_robin" "least_connections" "response_time" "random")
-OUT="heterogeneous_results.csv"
+OUT="results/heterogeneous_results.csv"
 
 echo "strategy,num_requests,concurrency,errors,wall_sec,throughput_rps,mean_latency_ms,p50_ms,p95_ms,p99_ms,accuracy" > "$OUT"
 
@@ -25,10 +27,10 @@ trap kill_all EXIT
 for s in "${STRATS[@]}"; do
     echo "--- $s (one slow worker) ---"
 
-    ./worker 5001 weights.bin     > /tmp/w1.log 2>&1 &
-    ./worker 5002 weights.bin     > /tmp/w2.log 2>&1 &
-    ./worker 5003 weights.bin     > /tmp/w3.log 2>&1 &
-    ./worker 5004 weights.bin 5   > /tmp/w4.log 2>&1 &   # slow one
+    ./worker 5001 data/weights.bin > /tmp/w1.log 2>&1 &
+    ./worker 5002 data/weights.bin > /tmp/w2.log 2>&1 &
+    ./worker 5003 data/weights.bin > /tmp/w3.log 2>&1 &
+    ./worker 5004 data/weights.bin 5 > /tmp/w4.log 2>&1 &   # slow one
     sleep 1
 
     ./coordinator "$PORT" "$s" \
@@ -36,7 +38,7 @@ for s in "${STRATS[@]}"; do
         > /tmp/coord.log 2>&1 &
     sleep 1
 
-    out=$(./client localhost "$PORT" "$N" "$C" mnist_test.bin 2>&1)
+    out=$(./client localhost "$PORT" "$N" "$C" data/mnist_test.bin 2>&1)
     csv=$(echo "$out" | grep "^CSV," | sed 's/^CSV,//')
     if [ -z "$csv" ]; then
         echo "no CSV line"

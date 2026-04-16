@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads a CSV with multiple runs per strategy and outputs averages
 
 import sys
 import csv

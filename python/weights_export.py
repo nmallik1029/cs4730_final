@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import struct
 import torch
 import torch.nn as nn
@@ -60,16 +61,19 @@ def dump(f, t):
     for v in flat:
         f.write(struct.pack("f", v))
 
-with open("weights.bin", "wb") as f:
+import os
+os.makedirs("data", exist_ok=True)
+
+with open("data/weights.bin", "wb") as f:
     dump(f, model.fc1.weight); dump(f, model.fc1.bias)
     dump(f, model.fc2.weight); dump(f, model.fc2.bias)
     dump(f, model.fc3.weight); dump(f, model.fc3.bias)
-print("wrote weights.bin")
+print("wrote data/weights.bin")
 
 # dump test set for the C++ client
 # format: int32 count, then for each sample: 784 float32 pixels, int32 label
 n = len(test_ds)
-with open("mnist_test.bin", "wb") as f:
+with open("data/mnist_test.bin", "wb") as f:
     f.write(struct.pack("i", n))
     for img, label in test_ds:
         px = img.numpy().astype("float32").flatten()

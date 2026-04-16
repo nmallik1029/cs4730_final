@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
+
 set -e
 
-# sanity check
-if [ ! -f weights.bin ] || [ ! -f mnist_test.bin ] || [ ! -x worker ] || [ ! -x coordinator ] || [ ! -x client ]; then
-    echo "missing weights.bin, mnist_test.bin, or executables. run 'make' first."
+if [ ! -f data/weights.bin ] || [ ! -f data/mnist_test.bin ] || [ ! -x worker ] || [ ! -x coordinator ] || [ ! -x client ]; then
+    echo "missing data files or executables. run 'make' from project root."
     exit 1
 fi
+
+mkdir -p results
 
 PORT=5000
 N=2000
 C=16
 STRATS=("round_robin" "least_connections" "response_time" "random")
 PORTS=(5001 5002 5003 5004)
-OUT="loadbalance_results.csv"
+OUT="results/loadbalance_results.csv"
 
 echo "strategy,num_requests,concurrency,errors,wall_sec,throughput_rps,mean_latency_ms,p50_ms,p95_ms,p99_ms,accuracy" > "$OUT"
 
@@ -27,7 +29,7 @@ for s in "${STRATS[@]}"; do
     echo "--- $s ---"
 
     for p in "${PORTS[@]}"; do
-        ./worker "$p" weights.bin > /tmp/w_$p.log 2>&1 &
+        ./worker "$p" data/weights.bin > /tmp/w_$p.log 2>&1 &
     done
     sleep 1
 
@@ -36,7 +38,7 @@ for s in "${STRATS[@]}"; do
         > /tmp/coord.log 2>&1 &
     sleep 1
 
-    out=$(./client localhost "$PORT" "$N" "$C" mnist_test.bin 2>&1)
+    out=$(./client localhost "$PORT" "$N" "$C" data/mnist_test.bin 2>&1)
     csv=$(echo "$out" | grep "^CSV," | sed 's/^CSV,//')
     if [ -z "$csv" ]; then
         echo "no CSV line in output"
