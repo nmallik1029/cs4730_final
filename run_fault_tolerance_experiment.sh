@@ -56,8 +56,7 @@ echo "Launching ${NUM_REQUESTS} requests; will kill worker ${KILL_PORT} at t=${K
 # Run client (blocks)
 ./client localhost "$COORD_PORT" "$NUM_REQUESTS" "$CONCURRENCY" mnist_test.bin > /tmp/client.out 2>&1
 
-# Wait for kill notification to print
-wait 2>/dev/null || true
+sleep 1  # let kill message flush
 
 echo ""
 echo "=== Client output ==="
