@@ -1,0 +1,11 @@
+coordinator
+worker
+client
+*.o
+*.exe
+
+# training data (already storede in weights.bin)
+data/
+
+.vscode/
+.DS_Store
