@@ -7,7 +7,6 @@
 #include <atomic>
 #include <chrono>
 #include <algorithm>
-#include <numeric>
 #include <random>
 
 #include <sys/socket.h>
@@ -15,40 +14,39 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
-// ---- Load balancing strategies ----
-enum Strategy { ROUND_ROBIN, LEAST_CONNECTIONS, RESPONSE_TIME, RANDOM_LB };
+// coordinator accepts client requests, picks a worker using one of 4 strategies,
+// and forwards the request. if a worker fails we mark it dead and try another.
 
-Strategy parse_strategy(const std::string& s) {
-    if (s == "round_robin")       return ROUND_ROBIN;
-    if (s == "least_connections") return LEAST_CONNECTIONS;
-    if (s == "response_time")     return RESPONSE_TIME;
-    if (s == "random")            return RANDOM_LB;
-    std::cerr << "Unknown strategy '" << s << "', defaulting to round_robin\n";
-    return ROUND_ROBIN;
+enum Strategy { RR, LEAST_CONN, RESP_TIME, RANDOM_LB };
+
+Strategy parse(const std::string& s) {
+    if (s == "round_robin") return RR;
+    if (s == "least_connections") return LEAST_CONN;
+    if (s == "response_time") return RESP_TIME;
+    if (s == "random") return RANDOM_LB;
+    std::cerr << "unknown strategy '" << s << "', defaulting to round_robin\n";
+    return RR;
 }
 
-// ---- Worker info ----
 struct Worker {
     std::string host;
     int port;
     std::atomic<bool> alive{true};
-    std::atomic<int>  active_connections{0};
-    // Running average response time in microseconds
-    std::mutex        rt_mutex;
-    double            avg_response_us = 1.0;
+    std::atomic<int>  active{0};
+    std::mutex rt_mu;
+    double avg_rt_us = 1.0;  // EMA of response time
 };
 
 static std::vector<Worker*> g_workers;
-static std::mutex            g_workers_mutex;
-static std::atomic<int>      g_rr_index{0};   // round robin counter
-static Strategy              g_strategy;
+static std::mutex g_wmu;
+static std::atomic<int> g_rr{0};
+static Strategy g_strat;
 
-// ---- Connect to a worker ----
-int connect_to_worker(Worker* w) {
+int dial(Worker* w) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;
 
-    // 3 second timeout for failure detection
+    // timeout so dead workers fail fast
     struct timeval tv{3, 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
@@ -65,181 +63,150 @@ int connect_to_worker(Worker* w) {
     return fd;
 }
 
-// ---- Pick a worker based on strategy ----
-Worker* pick_worker() {
-    std::lock_guard<std::mutex> lock(g_workers_mutex);
+Worker* pick() {
+    std::lock_guard<std::mutex> g(g_wmu);
 
-    // Collect alive workers
-    std::vector<Worker*> alive;
-    for (auto* w : g_workers)
-        if (w->alive) alive.push_back(w);
+    std::vector<Worker*> live;
+    for (auto* w : g_workers) if (w->alive) live.push_back(w);
+    if (live.empty()) return nullptr;
 
-    if (alive.empty()) return nullptr;
-
-    switch (g_strategy) {
-        case ROUND_ROBIN: {
-            int idx = g_rr_index.fetch_add(1) % (int)alive.size();
-            return alive[idx];
+    switch (g_strat) {
+        case RR: {
+            int i = g_rr.fetch_add(1) % (int)live.size();
+            return live[i];
         }
-        case LEAST_CONNECTIONS: {
-            return *std::min_element(alive.begin(), alive.end(),
-                [](Worker* a, Worker* b) {
-                    return a->active_connections < b->active_connections;
-                });
+        case LEAST_CONN: {
+            return *std::min_element(live.begin(), live.end(),
+                [](Worker* a, Worker* b) { return a->active < b->active; });
         }
-        case RESPONSE_TIME: {
-            return *std::min_element(alive.begin(), alive.end(),
-                [](Worker* a, Worker* b) {
-                    return a->avg_response_us < b->avg_response_us;
-                });
+        case RESP_TIME: {
+            return *std::min_element(live.begin(), live.end(),
+                [](Worker* a, Worker* b) { return a->avg_rt_us < b->avg_rt_us; });
         }
         case RANDOM_LB: {
             static std::mt19937 rng(42);
-            std::uniform_int_distribution<int> dist(0, (int)alive.size() - 1);
-            return alive[dist(rng)];
+            std::uniform_int_distribution<int> d(0, (int)live.size() - 1);
+            return live[d(rng)];
         }
     }
-    return alive[0];
+    return live[0];
 }
 
-// ---- Forward one request to a worker ----
-// Returns prediction, or -1 on failure
-int forward_to_worker(Worker* w, const std::vector<float>& input) {
+// send img to w, return prediction or -1 on failure
+int forward(Worker* w, const std::vector<float>& img) {
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    int fd = connect_to_worker(w);
+    int fd = dial(w);
     if (fd < 0) {
-        std::cerr << "Worker " << w->host << ":" << w->port << " unreachable, marking dead\n";
         w->alive = false;
         return -1;
     }
+    w->active++;
 
-    w->active_connections++;
-
-    // Send 784 floats
-    const char* buf = reinterpret_cast<const char*>(input.data());
-    int total = 0, needed = 784 * sizeof(float);
-    while (total < needed) {
-        int n = send(fd, buf + total, needed - total, 0);
+    const char* b = (const char*)img.data();
+    int total = 0, need = 784 * sizeof(float);
+    while (total < need) {
+        int n = send(fd, b + total, need - total, 0);
         if (n <= 0) {
-            std::cerr << "Worker " << w->host << ":" << w->port << " send failed\n";
             w->alive = false;
-            w->active_connections--;
+            w->active--;
             close(fd);
             return -1;
         }
         total += n;
     }
 
-    // Receive prediction
-    int prediction = -1;
-    int n = recv(fd, &prediction, sizeof(int), MSG_WAITALL);
+    int pred = -1;
+    int n = recv(fd, &pred, sizeof(int), MSG_WAITALL);
+    close(fd);
+    w->active--;
+
     if (n != sizeof(int)) {
-        std::cerr << "Worker " << w->host << ":" << w->port << " recv failed\n";
         w->alive = false;
-        w->active_connections--;
-        close(fd);
         return -1;
     }
 
-    close(fd);
-    w->active_connections--;
-
-    // Update response time EMA
+    // update EMA of response time
     auto t1 = std::chrono::high_resolution_clock::now();
-    double elapsed = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+    double us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     {
-        std::lock_guard<std::mutex> lock(w->rt_mutex);
-        w->avg_response_us = 0.8 * w->avg_response_us + 0.2 * elapsed;
+        std::lock_guard<std::mutex> g(w->rt_mu);
+        w->avg_rt_us = 0.8 * w->avg_rt_us + 0.2 * us;
     }
-
-    return prediction;
+    return pred;
 }
 
-// ---- Handle one client connection ----
-void handle_client(int client_fd) {
-    // Read 784 floats from client
-    std::vector<float> input(784);
-    int total = 0, needed = 784 * sizeof(float);
-    char* buf = reinterpret_cast<char*>(input.data());
-
-    while (total < needed) {
-        int n = recv(client_fd, buf + total, needed - total, 0);
-        if (n <= 0) {
-            std::cerr << "Coordinator: client disconnected during read\n";
-            close(client_fd);
-            return;
-        }
+void handle_client(int fd) {
+    std::vector<float> img(784);
+    int total = 0, need = 784 * sizeof(float);
+    char* b = (char*)img.data();
+    while (total < need) {
+        int n = recv(fd, b + total, need - total, 0);
+        if (n <= 0) { close(fd); return; }
         total += n;
     }
 
-    // Try workers until one succeeds (handles failures)
-    int prediction = -1;
-    int attempts = (int)g_workers.size();
-    for (int i = 0; i < attempts && prediction == -1; i++) {
-        Worker* w = pick_worker();
-        if (!w) { std::cerr << "No alive workers!\n"; break; }
-        prediction = forward_to_worker(w, input);
+    // try workers until one succeeds
+    int pred = -1;
+    int tries = (int)g_workers.size();
+    for (int i = 0; i < tries && pred == -1; i++) {
+        Worker* w = pick();
+        if (!w) break;
+        pred = forward(w, img);
     }
 
-    // Send result back to client
-    send(client_fd, &prediction, sizeof(int), 0);
-    close(client_fd);
+    send(fd, &pred, sizeof(int), 0);
+    close(fd);
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 5) {
-        std::cerr << "Usage: " << argv[0]
-                  << " <port> <strategy> <worker_host:port> [<worker_host:port> ...]\n";
-        std::cerr << "Strategies: round_robin, least_connections, response_time, random\n";
-        std::cerr << "Example: ./coordinator 5000 round_robin localhost:5001 localhost:5002\n";
+    if (argc < 4) {
+        std::cerr << "usage: " << argv[0]
+                  << " port strategy worker_host:port [worker_host:port ...]\n";
+        std::cerr << "strategies: round_robin, least_connections, response_time, random\n";
         return 1;
     }
 
-    int coord_port = std::stoi(argv[1]);
-    g_strategy = parse_strategy(argv[2]);
+    int port = std::stoi(argv[1]);
+    g_strat = parse(argv[2]);
 
-    // Parse worker addresses
     for (int i = 3; i < argc; i++) {
-        std::string addr = argv[i];
-        size_t colon = addr.rfind(':');
-        if (colon == std::string::npos) {
-            std::cerr << "Bad worker address: " << addr << "\n";
+        std::string a = argv[i];
+        size_t c = a.rfind(':');
+        if (c == std::string::npos) {
+            std::cerr << "bad address: " << a << "\n";
             return 1;
         }
         Worker* w = new Worker();
-        w->host = addr.substr(0, colon);
-        w->port = std::stoi(addr.substr(colon + 1));
+        w->host = a.substr(0, c);
+        w->port = std::stoi(a.substr(c + 1));
         g_workers.push_back(w);
-        std::cout << "Registered worker: " << w->host << ":" << w->port << "\n";
+        std::cout << "worker: " << w->host << ":" << w->port << "\n";
     }
 
-    // Start coordinator server
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) { perror("socket"); return 1; }
+    int srv = socket(AF_INET, SOCK_STREAM, 0);
+    if (srv < 0) { perror("socket"); return 1; }
 
     int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     sockaddr_in addr{};
-    addr.sin_family      = AF_INET;
+    addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port        = htons(coord_port);
+    addr.sin_port = htons(port);
 
-    if (bind(server_fd, (sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); return 1; }
-    if (listen(server_fd, 256) < 0) { perror("listen"); return 1; }
+    if (bind(srv, (sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); return 1; }
+    if (listen(srv, 256) < 0) { perror("listen"); return 1; }
 
-    std::cout << "Coordinator listening on port " << coord_port
-              << " | strategy: " << argv[2] << "\n";
+    std::cout << "coordinator on " << port << ", strategy=" << argv[2] << "\n";
 
     while (true) {
-        sockaddr_in client_addr{};
-        socklen_t len = sizeof(client_addr);
-        int client_fd = accept(server_fd, (sockaddr*)&client_addr, &len);
-        if (client_fd < 0) { perror("accept"); continue; }
-        std::thread(handle_client, client_fd).detach();
+        sockaddr_in ca{};
+        socklen_t len = sizeof(ca);
+        int cfd = accept(srv, (sockaddr*)&ca, &len);
+        if (cfd < 0) { perror("accept"); continue; }
+        std::thread(handle_client, cfd).detach();
     }
-
-    close(server_fd);
+    close(srv);
     return 0;
 }
