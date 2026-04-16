@@ -33,14 +33,14 @@ struct Worker {
     int port;
     std::atomic<bool> alive{true};
     std::atomic<int>  active{0};
-    std::mutex rt_mu;
-    double avg_rt_us = 1.0;  // EMA of response time
+    std::mutex        rt_mu;
+    double            avg_rt_us = 1.0;  // EMA of response time
 };
 
 static std::vector<Worker*> g_workers;
-static std::mutex g_wmu;
-static std::atomic<int> g_rr{0};
-static Strategy g_strat;
+static std::mutex           g_wmu;
+static std::atomic<int>     g_rr{0};
+static Strategy             g_strat;
 
 int dial(Worker* w) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -98,6 +98,7 @@ int forward(Worker* w, const std::vector<float>& img) {
 
     int fd = dial(w);
     if (fd < 0) {
+        std::cerr << "worker " << w->host << ":" << w->port << " down\n";
         w->alive = false;
         return -1;
     }

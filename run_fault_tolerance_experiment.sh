@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# kills a worker mid-run to check that the coordinator reroutes correctly
-# 30k requests, each worker has 2ms delay so the kill actually happens during
-
 set -e
 
 PORT=5000
@@ -47,4 +44,4 @@ echo "client:"
 cat /tmp/client.out
 echo ""
 echo "coordinator log:"
-grep -E "unreachable|recv failed|send failed|No alive" fault_tolerance.log || echo "(nothing)"
+grep -E "down|No alive" fault_tolerance.log || echo "(nothing)"
