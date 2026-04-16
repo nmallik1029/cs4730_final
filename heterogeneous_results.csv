@@ -1,0 +1,5 @@
+strategy,num_requests,concurrency,errors,wall_sec,throughput_rps,mean_latency_ms,p50_ms,p95_ms,p99_ms,accuracy
+round_robin,3000,16,0,0.343311,8738.43,1.74683,0.483,5.608,5.751,95.6667
+least_connections,3000,16,0,0.214607,13979,1.07754,0.852,1.853,6.155,95.6667
+response_time,3000,16,0,0.22774,13172.9,1.14603,1.077,1.857,3.847,95.6667
+random,3000,16,0,0.349838,8575.4,1.77319,0.51,5.653,5.935,95.6667
