@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# same as the load balancing experiment but one worker is slow
-# (5ms delay added) so we can actually see strategy differences
 
 set -e
+
+if [ ! -f weights.bin ] || [ ! -f mnist_test.bin ] || [ ! -x worker ] || [ ! -x coordinator ] || [ ! -x client ]; then
+    echo "missing weights.bin, mnist_test.bin, or executables. run 'make' first."
+    exit 1
+fi
 
 PORT=5000
 N=3000
@@ -22,10 +25,10 @@ trap kill_all EXIT
 for s in "${STRATS[@]}"; do
     echo "--- $s (one slow worker) ---"
 
-    ./worker 5001 weights.bin > /tmp/w1.log 2>&1 &
-    ./worker 5002 weights.bin > /tmp/w2.log 2>&1 &
-    ./worker 5003 weights.bin > /tmp/w3.log 2>&1 &
-    ./worker 5004 weights.bin 5 > /tmp/w4.log 2>&1 &   # slow one
+    ./worker 5001 weights.bin     > /tmp/w1.log 2>&1 &
+    ./worker 5002 weights.bin     > /tmp/w2.log 2>&1 &
+    ./worker 5003 weights.bin     > /tmp/w3.log 2>&1 &
+    ./worker 5004 weights.bin 5   > /tmp/w4.log 2>&1 &   # slow one
     sleep 1
 
     ./coordinator "$PORT" "$s" \

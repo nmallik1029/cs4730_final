@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# kills a worker mid-run to check that the coordinator reroutes correctly
-# 30k requests, each worker has 2ms delay so the kill actually happens during
 
 set -e
+
+if [ ! -f weights.bin ] || [ ! -f mnist_test.bin ] || [ ! -x worker ] || [ ! -x coordinator ] || [ ! -x client ]; then
+    echo "missing weights.bin, mnist_test.bin, or executables. run 'make' first."
+    exit 1
+fi
 
 PORT=5000
 N=30000

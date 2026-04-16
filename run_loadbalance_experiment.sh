@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# runs all 4 load balancing strategies with 4 identical workers
-# writes results to loadbalance_results.csv
-
 set -e
+
+# sanity check
+if [ ! -f weights.bin ] || [ ! -f mnist_test.bin ] || [ ! -x worker ] || [ ! -x coordinator ] || [ ! -x client ]; then
+    echo "missing weights.bin, mnist_test.bin, or executables. run 'make' first."
+    exit 1
+fi
 
 PORT=5000
 N=2000
