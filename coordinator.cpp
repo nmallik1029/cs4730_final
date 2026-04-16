@@ -15,34 +15,35 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
-//  Load balancing strategies
+// ---- Load balancing strategies ----
 enum Strategy { ROUND_ROBIN, LEAST_CONNECTIONS, RESPONSE_TIME, RANDOM_LB };
 
 Strategy parse_strategy(const std::string& s) {
-    if (s == "round_robin") return ROUND_ROBIN;
+    if (s == "round_robin")       return ROUND_ROBIN;
     if (s == "least_connections") return LEAST_CONNECTIONS;
-    if (s == "response_time") return RESPONSE_TIME;
-    if (s == "random") return RANDOM_LB;
+    if (s == "response_time")     return RESPONSE_TIME;
+    if (s == "random")            return RANDOM_LB;
     std::cerr << "Unknown strategy '" << s << "', defaulting to round_robin\n";
     return ROUND_ROBIN;
 }
 
-// Worker info
+// ---- Worker info ----
 struct Worker {
     std::string host;
     int port;
     std::atomic<bool> alive{true};
     std::atomic<int>  active_connections{0};
-    std::mutex rt_mutex;
-    double avg_response_us = 1.0;
+    // Running average response time in microseconds
+    std::mutex        rt_mutex;
+    double            avg_response_us = 1.0;
 };
 
 static std::vector<Worker*> g_workers;
-static std::mutex g_workers_mutex;
-static std::atomic<int> g_rr_index{0};   // round robin counter
-static Strategy g_strategy;
+static std::mutex            g_workers_mutex;
+static std::atomic<int>      g_rr_index{0};   // round robin counter
+static Strategy              g_strategy;
 
-// Connect to a worker 
+// ---- Connect to a worker ----
 int connect_to_worker(Worker* w) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;
@@ -54,7 +55,7 @@ int connect_to_worker(Worker* w) {
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(w->port);
+    addr.sin_port   = htons(w->port);
     inet_pton(AF_INET, w->host.c_str(), &addr.sin_addr);
 
     if (connect(fd, (sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -64,10 +65,11 @@ int connect_to_worker(Worker* w) {
     return fd;
 }
 
-// Pick a worker based on strategy 
+// ---- Pick a worker based on strategy ----
 Worker* pick_worker() {
     std::lock_guard<std::mutex> lock(g_workers_mutex);
 
+    // Collect alive workers
     std::vector<Worker*> alive;
     for (auto* w : g_workers)
         if (w->alive) alive.push_back(w);
@@ -100,14 +102,14 @@ Worker* pick_worker() {
     return alive[0];
 }
 
-// Forward one request to a worker 
+// ---- Forward one request to a worker ----
 // Returns prediction, or -1 on failure
 int forward_to_worker(Worker* w, const std::vector<float>& input) {
     auto t0 = std::chrono::high_resolution_clock::now();
 
     int fd = connect_to_worker(w);
     if (fd < 0) {
-        std::cerr << "Worker " << w->host << ":" << w->port << " unreachable\n";
+        std::cerr << "Worker " << w->host << ":" << w->port << " unreachable, marking dead\n";
         w->alive = false;
         return -1;
     }
@@ -129,7 +131,7 @@ int forward_to_worker(Worker* w, const std::vector<float>& input) {
         total += n;
     }
 
-    // prediction
+    // Receive prediction
     int prediction = -1;
     int n = recv(fd, &prediction, sizeof(int), MSG_WAITALL);
     if (n != sizeof(int)) {
@@ -143,6 +145,7 @@ int forward_to_worker(Worker* w, const std::vector<float>& input) {
     close(fd);
     w->active_connections--;
 
+    // Update response time EMA
     auto t1 = std::chrono::high_resolution_clock::now();
     double elapsed = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     {
@@ -153,8 +156,9 @@ int forward_to_worker(Worker* w, const std::vector<float>& input) {
     return prediction;
 }
 
-// Handle one client connection 
+// ---- Handle one client connection ----
 void handle_client(int client_fd) {
+    // Read 784 floats from client
     std::vector<float> input(784);
     int total = 0, needed = 784 * sizeof(float);
     char* buf = reinterpret_cast<char*>(input.data());
@@ -195,6 +199,7 @@ int main(int argc, char* argv[]) {
     int coord_port = std::stoi(argv[1]);
     g_strategy = parse_strategy(argv[2]);
 
+    // Parse worker addresses
     for (int i = 3; i < argc; i++) {
         std::string addr = argv[i];
         size_t colon = addr.rfind(':');
@@ -225,7 +230,7 @@ int main(int argc, char* argv[]) {
     if (listen(server_fd, 256) < 0) { perror("listen"); return 1; }
 
     std::cout << "Coordinator listening on port " << coord_port
-              << "strategy: " << argv[2] << "\n";
+              << " | strategy: " << argv[2] << "\n";
 
     while (true) {
         sockaddr_in client_addr{};
