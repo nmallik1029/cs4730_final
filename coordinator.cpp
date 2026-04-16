@@ -98,7 +98,7 @@ int forward(Worker* w, const std::vector<float>& img) {
 
     int fd = dial(w);
     if (fd < 0) {
-        std::cerr << "worker " << w->host << ":" << w->port << " down\n";
+        std::cerr << "worker " << w->host << ":" << w->port << " down" << std::endl;
         w->alive = false;
         return -1;
     }
@@ -109,6 +109,7 @@ int forward(Worker* w, const std::vector<float>& img) {
     while (total < need) {
         int n = send(fd, b + total, need - total, 0);
         if (n <= 0) {
+            std::cerr << "worker " << w->host << ":" << w->port << " send fail" << std::endl;
             w->alive = false;
             w->active--;
             close(fd);
@@ -123,6 +124,7 @@ int forward(Worker* w, const std::vector<float>& img) {
     w->active--;
 
     if (n != sizeof(int)) {
+        std::cerr << "worker " << w->host << ":" << w->port << " recv fail" << std::endl;
         w->alive = false;
         return -1;
     }
