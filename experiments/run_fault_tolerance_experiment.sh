@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# kill a worker mid-run to check that the coordinator reroutes correctly
 
 set -e
 
@@ -7,7 +8,7 @@ if [ ! -f data/weights.bin ] || [ ! -f data/mnist_test.bin ] || [ ! -x worker ] 
     exit 1
 fi
 
-mkdir -p results
+mkdir -p results logs
 
 PORT=5000
 N=30000
@@ -24,9 +25,9 @@ trap kill_all EXIT
 kill_all
 
 echo "starting 3 workers (2ms delay each)"
-./worker 5001 data/weights.bin 2 > /tmp/w1.log 2>&1 &
-./worker 5002 data/weights.bin 2 > /tmp/w2.log 2>&1 &
-./worker 5003 data/weights.bin 2 > /tmp/w3.log 2>&1 &
+./worker 5001 data/weights.bin 2 > logs/w1.log 2>&1 &
+./worker 5002 data/weights.bin 2 > logs/w2.log 2>&1 &
+./worker 5003 data/weights.bin 2 > logs/w3.log 2>&1 &
 sleep 1
 
 echo "starting coordinator"
@@ -44,12 +45,12 @@ echo "sending $N requests; killing worker $KILL_PORT at t=${KILL_AT}s"
     pkill -f "./worker $KILL_PORT " || true
 ) &
 
-./client localhost "$PORT" "$N" "$C" data/mnist_test.bin > /tmp/client.out 2>&1
+./client localhost "$PORT" "$N" "$C" data/mnist_test.bin > logs/client.out 2>&1
 
 sleep 1
 echo ""
 echo "client:"
-cat /tmp/client.out
+cat logs/client.out
 echo ""
 echo "coordinator log:"
 grep -E "down|send fail|recv fail" results/fault_tolerance.log || echo "(nothing)"

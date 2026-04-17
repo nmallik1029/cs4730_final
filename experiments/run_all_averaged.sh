@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
+# run the 2 load balancing experiments 3 times each and average
 
 set -e
+
+mkdir -p logs
 
 RUNS=3
 
@@ -16,7 +19,7 @@ run_n_times() {
 
     for i in $(seq 1 $RUNS); do
         echo "  run $i..."
-        ./"$script" > /tmp/run_$i.log 2>&1
+        ./"$script" > logs/run_$i.log 2>&1
 
         if [ $header_written -eq 0 ]; then
             head -n 1 "$csv" | sed 's/^/run,/' > "$combined"

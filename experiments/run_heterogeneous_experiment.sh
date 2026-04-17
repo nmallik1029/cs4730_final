@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# same as loadbalance but one worker has a 5ms delay to simulate heterogeneity
 
 set -e
 
@@ -7,7 +8,7 @@ if [ ! -f data/weights.bin ] || [ ! -f data/mnist_test.bin ] || [ ! -x worker ] 
     exit 1
 fi
 
-mkdir -p results
+mkdir -p results logs
 
 PORT=5000
 N=3000
@@ -27,15 +28,15 @@ trap kill_all EXIT
 for s in "${STRATS[@]}"; do
     echo "--- $s (one slow worker) ---"
 
-    ./worker 5001 data/weights.bin > /tmp/w1.log 2>&1 &
-    ./worker 5002 data/weights.bin > /tmp/w2.log 2>&1 &
-    ./worker 5003 data/weights.bin > /tmp/w3.log 2>&1 &
-    ./worker 5004 data/weights.bin 5 > /tmp/w4.log 2>&1 &   # slow one
+    ./worker 5001 data/weights.bin > logs/w1.log 2>&1 &
+    ./worker 5002 data/weights.bin > logs/w2.log 2>&1 &
+    ./worker 5003 data/weights.bin > logs/w3.log 2>&1 &
+    ./worker 5004 data/weights.bin 5 > logs/w4.log 2>&1 &   # slow one
     sleep 1
 
     ./coordinator "$PORT" "$s" \
         localhost:5001 localhost:5002 localhost:5003 localhost:5004 \
-        > /tmp/coord.log 2>&1 &
+        > logs/coord.log 2>&1 &
     sleep 1
 
     out=$(./client localhost "$PORT" "$N" "$C" data/mnist_test.bin 2>&1)

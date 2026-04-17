@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# run all 4 load balancing strategies with 4 identical workers
+# run from project root: ./experiments/run_loadbalance_experiment.sh
 
 set -e
 
@@ -7,7 +9,7 @@ if [ ! -f data/weights.bin ] || [ ! -f data/mnist_test.bin ] || [ ! -x worker ] 
     exit 1
 fi
 
-mkdir -p results
+mkdir -p results logs
 
 PORT=5000
 N=2000
@@ -29,13 +31,13 @@ for s in "${STRATS[@]}"; do
     echo "--- $s ---"
 
     for p in "${PORTS[@]}"; do
-        ./worker "$p" data/weights.bin > /tmp/w_$p.log 2>&1 &
+        ./worker "$p" data/weights.bin > logs/w_$p.log 2>&1 &
     done
     sleep 1
 
     ./coordinator "$PORT" "$s" \
         localhost:5001 localhost:5002 localhost:5003 localhost:5004 \
-        > /tmp/coord.log 2>&1 &
+        > logs/coord.log 2>&1 &
     sleep 1
 
     out=$(./client localhost "$PORT" "$N" "$C" data/mnist_test.bin 2>&1)
